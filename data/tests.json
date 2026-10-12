@@ -1,0 +1,286 @@
+{
+ "final": {
+  "features": [
+   "x_sr",
+   "x_ypp",
+   "x_fpi",
+   "loc",
+   "fluck_diff"
+  ],
+  "mae": 12.299,
+  "ats": 0.5185,
+  "ats5": 0.5363,
+  "n5": 537,
+  "ats7": 0.5455,
+  "n7": 220
+ },
+ "added": [
+  {
+   "feature": "x_epa",
+   "label": "EPA per play (opponent-adjusted)",
+   "mae": 12.306,
+   "ats": 0.5162,
+   "ats5": 0.5174,
+   "n5": 547,
+   "ats7": 0.5328,
+   "n7": 229
+  },
+  {
+   "feature": "x_pts",
+   "label": "Points scored and allowed (opponent-adjusted)",
+   "mae": 12.307,
+   "ats": 0.5143,
+   "ats5": 0.5167,
+   "n5": 540,
+   "ats7": 0.531,
+   "n7": 226
+  },
+  {
+   "feature": "x_mkt",
+   "label": "Market power rating from earlier closing lines",
+   "mae": 12.294,
+   "ats": 0.5143,
+   "ats5": 0.5246,
+   "n5": 509,
+   "ats7": 0.4811,
+   "n7": 212
+  },
+  {
+   "feature": "trav_diff",
+   "label": "Travel distance",
+   "mae": 12.314,
+   "ats": 0.5211,
+   "ats5": 0.5287,
+   "n5": 541,
+   "ats7": 0.531,
+   "n7": 226
+  },
+  {
+   "feature": "tz_abs_a",
+   "label": "Time zones crossed",
+   "mae": 12.316,
+   "ats": 0.5143,
+   "ats5": 0.5223,
+   "n5": 538,
+   "ats7": 0.5247,
+   "n7": 223
+  },
+  {
+   "feature": "alt_edge",
+   "label": "Altitude (visitor from low elevation)",
+   "mae": 12.312,
+   "ats": 0.5191,
+   "ats5": 0.529,
+   "n5": 552,
+   "ats7": 0.5328,
+   "n7": 229
+  },
+  {
+   "feature": "body_clock",
+   "label": "West-coast team in an early eastern kickoff",
+   "mae": 12.307,
+   "ats": 0.5185,
+   "ats5": 0.5285,
+   "n5": 543,
+   "ats7": 0.527,
+   "n7": 222
+  },
+  {
+   "feature": "rest_diff",
+   "label": "Rest days",
+   "mae": 12.313,
+   "ats": 0.5136,
+   "ats5": 0.5213,
+   "n5": 539,
+   "ats7": 0.5294,
+   "n7": 221
+  },
+  {
+   "feature": "bye_edge",
+   "label": "Coming off a bye",
+   "mae": 12.316,
+   "ats": 0.5133,
+   "ats5": 0.525,
+   "n5": 541,
+   "ats7": 0.5459,
+   "n7": 218
+  },
+  {
+   "feature": "short_edge",
+   "label": "Short week",
+   "mae": 12.303,
+   "ats": 0.5178,
+   "ats5": 0.5354,
+   "n5": 536,
+   "ats7": 0.5434,
+   "n7": 219
+  },
+  {
+   "feature": "ko_night_loc",
+   "label": "Night game at home",
+   "mae": 12.301,
+   "ats": 0.5172,
+   "ats5": 0.5346,
+   "n5": 535,
+   "ats7": 0.5229,
+   "n7": 218
+  },
+  {
+   "feature": "weekday",
+   "label": "Weekday game",
+   "mae": 12.303,
+   "ats": 0.514,
+   "ats5": 0.5304,
+   "n5": 543,
+   "ats7": 0.5351,
+   "n7": 228
+  },
+  {
+   "feature": "tom_diff",
+   "label": "Turnover margin to date",
+   "mae": 12.301,
+   "ats": 0.5162,
+   "ats5": 0.5277,
+   "n5": 542,
+   "ats7": 0.536,
+   "n7": 222
+  },
+  {
+   "feature": "qbprev_edge",
+   "label": "QB change known before kickoff (last start was not the main QB)",
+   "mae": 12.295,
+   "ats": 0.5136,
+   "ats5": 0.5295,
+   "n5": 525,
+   "ats7": 0.545,
+   "n7": 222
+  },
+  {
+   "feature": "qbchg_edge",
+   "label": "QB change, actual starter (needs late news)",
+   "mae": 12.228,
+   "ats": 0.5276,
+   "ats5": 0.5356,
+   "n5": 534,
+   "ats7": 0.5399,
+   "n7": 213
+  }
+ ],
+ "removed": [
+  {
+   "feature": "x_fpi",
+   "label": "ESPN FPI",
+   "mae": 12.889,
+   "ats": 0.5078,
+   "ats5": 0.5095,
+   "n5": 1213,
+   "ats7": 0.5265,
+   "n7": 754
+  },
+  {
+   "feature": "x_sr",
+   "label": "Success rate",
+   "mae": 12.312,
+   "ats": 0.5198,
+   "ats5": 0.5221,
+   "n5": 544,
+   "ats7": 0.5345,
+   "n7": 232
+  },
+  {
+   "feature": "x_ypp",
+   "label": "Yards per play",
+   "mae": 12.328,
+   "ats": 0.5049,
+   "ats5": 0.5099,
+   "n5": 553,
+   "ats7": 0.5205,
+   "n7": 219
+  },
+  {
+   "feature": "fluck_diff",
+   "label": "Fumble luck",
+   "mae": 12.306,
+   "ats": 0.5123,
+   "ats5": 0.5253,
+   "n5": 533,
+   "ats7": 0.5342,
+   "n7": 219
+  }
+ ],
+ "vs_line": [
+  {
+   "feature": "trav_diff",
+   "label": "Travel distance",
+   "pts": 0.24,
+   "t": 0.6
+  },
+  {
+   "feature": "tz_abs_a",
+   "label": "Time zones crossed",
+   "pts": -0.07,
+   "t": -0.1
+  },
+  {
+   "feature": "alt_edge",
+   "label": "Altitude (visitor from low elevation)",
+   "pts": 1.74,
+   "t": 1.0
+  },
+  {
+   "feature": "body_clock",
+   "label": "West-coast team in an early eastern kickoff",
+   "pts": -4.18,
+   "t": -1.5
+  },
+  {
+   "feature": "rest_diff",
+   "label": "Rest days",
+   "pts": -0.21,
+   "t": -0.8
+  },
+  {
+   "feature": "bye_edge",
+   "label": "Coming off a bye",
+   "pts": 1.19,
+   "t": 0.6
+  },
+  {
+   "feature": "short_edge",
+   "label": "Short week",
+   "pts": -0.64,
+   "t": -0.2
+  },
+  {
+   "feature": "ko_night_loc",
+   "label": "Night game at home",
+   "pts": 0.21,
+   "t": 0.5
+  },
+  {
+   "feature": "weekday",
+   "label": "Weekday game",
+   "pts": -0.59,
+   "t": -1.0
+  },
+  {
+   "feature": "tom_diff",
+   "label": "Turnover margin to date",
+   "pts": -0.13,
+   "t": -0.7
+  },
+  {
+   "feature": "qbprev_edge",
+   "label": "QB change known before kickoff (last start was not the main QB)",
+   "pts": -1.76,
+   "t": -3.2
+  },
+  {
+   "feature": "qbchg_edge",
+   "label": "QB change, actual starter (needs late news)",
+   "pts": 2.58,
+   "t": 5.1
+  }
+ ],
+ "n_games": 5186
+}

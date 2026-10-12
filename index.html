@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CFB Spread Model</title>
+<meta name="description" content="FBS college football spread and total model with DraftKings lines, game detail, results and a full backtest.">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+<script>
+  try { var t = localStorage.getItem('cfb-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="top">
+      <img class="logo" src="assets/logo.svg" alt="">
+      <div class="title">
+        <h1>CFB Spread Model</h1>
+        <div class="sub" id="sub">loading…</div>
+      </div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="rule"></div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab on" data-tab="week">This week</button>
+    <button class="tab" data-tab="detail">Game detail</button>
+    <button class="tab" data-tab="results">Results</button>
+    <button class="tab" data-tab="ratings">Ratings</button>
+    <button class="tab" data-tab="method">Method &amp; testing</button>
+  </nav>
+
+  <main>
+    <section id="tab-week"></section>
+    <section id="tab-detail" class="hide"></section>
+    <section id="tab-results" class="hide"></section>
+    <section id="tab-ratings" class="hide"></section>
+    <section id="tab-method" class="hide"></section>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
