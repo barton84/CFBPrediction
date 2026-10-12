@@ -267,7 +267,8 @@ def main(offline=False):
                         'total_result': None if tr == 0 or te == 0 else bool(np.sign(te) == np.sign(tr))})
         if ent.get('first') and ent['first'].get('spread') is not None:
             f = ent['first']
-            rec['posted'] = {'spread': f['spread'], 'ts': f['ts'], 'model_margin': f.get('model_margin')}
+            rec['posted'] = {'spread': f['spread'], 'ts': f['ts'], 'model_margin': f.get('model_margin'),
+                             'total': f.get('total'), 'model_total': f.get('model_total')}
         res.append(rec)
     dump({'season': season, 'games': res}, f'{DATA}/results.json')
 

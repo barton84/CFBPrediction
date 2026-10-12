@@ -4,7 +4,7 @@
 
   const S = {};             // loaded data
   const UI = {
-    tab: 'week', view: 'spread', minEdge: 0, conf: '', q: '',
+    tab: 'week', view: 'spread', minEdge: 0, conf: '', q: '', toward: false,
     gameId: null, custom: null, resWeek: null, rsort: { k: 'power', d: -1 }, rconf: '', rq: '',
     wsort: { k: 'kickoff', d: 1 }
   };
@@ -39,6 +39,13 @@
     if (tbd) return day + ', TBD';
     const t = d.toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' });
     return day + ' ' + t + ' CT';
+  }
+  function ctShort(iso, tbd) {
+    if (!iso) return '–';
+    const d = new Date(iso);
+    const day = d.toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'numeric', day: 'numeric' }).replace(',', '');
+    if (tbd) return day + ' TBD';
+    return day + ' ' + d.toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' });
   }
   function builtStamp(iso) {
     const d = new Date(iso);
@@ -116,6 +123,28 @@
     const p = Math.min(0.58, sigmoid(S.model.total.hit_slope * ae));
     const push = Number.isInteger(g.line.total) ? 0.02 : 0;
     return { t, edge, ae, over: edge >= 0, p, push };
+  }
+  // line movement since the first DraftKings line the job saw, judged from the side the model likes now
+  function moveInfo(g, isSpread) {
+    const f = g.first, L = g.line;
+    if (!f || !L || L.source !== 'DK') return null;
+    if (isSpread) {
+      const c = spreadCalc(g);
+      if (!c || f.spread == null) return null;
+      const opened = c.homeSide ? f.spread : -f.spread;
+      const mv = opened - c.sideLine;            // + : the model side now gets fewer points
+      return { mv, opened, openedTxt: `${abbr(f.spread <= 0 ? g.home : g.away)} ${fmtLine(-Math.abs(f.spread))}`, ts: f.ts };
+    }
+    const c = totalCalc(g);
+    if (!c || f.total == null) return null;
+    const mv = c.over ? L.total - f.total : f.total - L.total;
+    return { mv, opened: f.total, openedTxt: trim(f.total), ts: f.ts };
+  }
+  function moveHtml(mi) {
+    if (!mi) return '<span class="dim">–</span>';
+    if (Math.abs(mi.mv) < 0.01) return `<span class="pill none">no move</span>`;
+    const tw = mi.mv > 0;
+    return `<span class="pill ${tw ? 'toward' : 'away'}">${tw ? '▲' : '▼'} ${trim(Math.abs(mi.mv))} ${tw ? 'toward' : 'away'}</span><div class="opened">opened ${esc(mi.openedTxt)}</div>`;
   }
   function pushRate(k) { const r = S.model.push_rate || {}; return r[String(Math.round(k))] || 0; }
   function flagOf(ae) { return ae >= 7 ? 'f7' : ae >= 5 ? 'f5' : ''; }
@@ -232,6 +261,7 @@
     if (q) rows = rows.filter(({ g }) => (g.home.school + ' ' + g.away.school).toLowerCase().includes(q));
     if (UI.conf) rows = rows.filter(({ g }) => confOf(g.home.id) === UI.conf || confOf(g.away.id) === UI.conf);
     if (UI.minEdge) rows = rows.filter(({ c, g }) => c && !g.final && c.ae >= UI.minEdge);
+    if (UI.toward) rows = rows.filter(({ g }) => { const mi = !g.final && moveInfo(g, isSpread); return mi && mi.mv > 0; });
     const k = UI.wsort.k, d = UI.wsort.d;
     rows.sort((A, B) => {
       if (k === 'edge') return d * (((A.c && !A.g.final) ? A.c.ae : -1) - ((B.c && !B.g.final) ? B.c.ae : -1));
@@ -241,9 +271,11 @@
     const n5 = live.filter((c) => c.ae >= 5).length, n7 = live.filter((c) => c.ae >= 7).length;
     const nLines = W.games.filter((g) => g.line && (isSpread ? g.line.spread != null : g.line.total != null)).length;
     const what = isSpread ? 'DraftKings line' : 'DraftKings total';
+    const flagged = W.games.filter((g) => { const c = isSpread ? spreadCalc(g) : totalCalc(g); return !g.final && c && c.ae >= 5; });
+    const nTow = flagged.filter((g) => { const mi = moveInfo(g, isSpread); return mi && mi.mv > 0; }).length;
     const chance = isSpread ? "Cover chance is for the model's side with pushes refunded" : "Hit chance is for the model's side of the total";
     const lead = nLines
-      ? `<b>${n5} games</b> where the model is 5+ points off the ${what} (<b>${n7}</b> at 7+). ${chance}; break-even at -110 is ${BREAK_EVEN}%.`
+      ? `<b>${n5} games</b> where the model is 5+ points off the ${what} (<b>${n7}</b> at 7+)${nTow ? `; the line has moved toward the model in <b>${nTow}</b> of them` : ''}. ${chance}; break-even at -110 is ${BREAK_EVEN}%. Move is since the first DraftKings line the daily job saw.`
       : `No ${what}s posted for week ${W.week} yet. The daily job pulls DraftKings each morning; model numbers are already below.`;
     const sortArr = (key) => (UI.wsort.k === key ? `<span class="arr">${UI.wsort.d > 0 ? '▲' : '▼'}</span>` : '');
     el.innerHTML = `
@@ -258,14 +290,15 @@
         <div class="filters">
           <input id="wq" placeholder="Search a team" value="${esc(UI.q)}">
           <select id="wconf"><option value="">All conferences</option>${confs.map((c) => `<option ${c === UI.conf ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+          <label class="check"><input type="checkbox" id="wtow" ${UI.toward ? 'checked' : ''}> Only lines moving toward the model</label>
         </div>
         <div class="tblwrap"><table>
           <thead><tr>
             <th>Matchup</th><th class="sort" data-s="kickoff">Kickoff ${sortArr('kickoff')}</th>
-            <th class="num">Line</th><th class="num">Model</th><th>Model side</th>
+            <th class="num">Line</th><th>Move</th><th class="num">Model</th><th>Model side</th>
             <th class="num sort" data-s="edge">Edge ${sortArr('edge')}</th><th>${isSpread ? 'Cover chance' : 'Hit chance'}</th><th></th><th></th>
           </tr></thead>
-          <tbody>${rows.map(({ g, c }) => weekRow(g, c, isSpread)).join('') || `<tr><td colspan="9" class="empty">No games match.</td></tr>`}</tbody>
+          <tbody>${rows.map(({ g, c }) => weekRow(g, c, isSpread)).join('') || `<tr><td colspan="10" class="empty">No games match.</td></tr>`}</tbody>
         </table></div>
         <p class="note">Kickoff times are Central. ${weekFootnote()}</p>
       </div>`;
@@ -276,6 +309,7 @@
     }));
     const wq = $('#wq'); wq.oninput = () => { UI.q = wq.value; renderWeek(); const n = $('#wq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
     $('#wconf').onchange = (e) => { UI.conf = e.target.value; renderWeek(); };
+    $('#wtow').onchange = (e) => { UI.toward = e.target.checked; renderWeek(); };
     el.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => { UI.gameId = b.dataset.open; UI.custom = null; setTab('detail'); }));
   }
   function weekRow(g, c, isSpread) {
@@ -307,8 +341,8 @@
       side = `<span class="final">final ${g.score.away}-${g.score.home}</span>`;
     }
     const cls = !g.final && c ? flagOf(c.ae) : '';
-    return `<tr class="${cls}"><td class="mcell">${matchup(g)}</td><td class="mono">${ctTime(g.kickoff, g.tbd)}</td>
-      <td class="num">${line} ${L ? src : ''}</td><td class="num">${model}</td><td>${side}</td>
+    return `<tr class="${cls}"><td class="mcell">${matchup(g)}</td><td class="mono">${ctShort(g.kickoff, g.tbd)}</td>
+      <td class="num">${line} ${L ? src : ''}</td><td>${g.final ? '<span class="dim">–</span>' : moveHtml(moveInfo(g, isSpread))}</td><td class="num">${model}</td><td>${side}</td>
       <td class="num">${edge}</td><td class="mono">${ch}</td><td>${flag}</td>
       <td><button class="open" data-open="${g.id}">Open</button></td></tr>`;
   }
@@ -360,7 +394,7 @@
         <label class="check"><input type="checkbox" id="neut" ${g.neutral ? 'checked' : ''}> Neutral site</label>
         <div class="stats">
           <div class="stat"><div class="k">Model spread</div><div class="v">${esc(abbr(favM))} ${fmtLine(-Math.abs(m))}</div>
-            <div class="s">${L && L.spread != null ? `Line: ${esc(abbr(L.spread <= 0 ? g.home : g.away))} ${fmtLine(-Math.abs(L.spread))} (${L.source === 'DK' ? 'DraftKings' : 'ESPN'})` : 'No line posted yet'}</div></div>
+            <div class="s">${L && L.spread != null ? `Line: ${esc(abbr(L.spread <= 0 ? g.home : g.away))} ${fmtLine(-Math.abs(L.spread))} (${L.source === 'DK' ? 'DraftKings' : 'ESPN'})` : 'No line posted yet'}${lineHistory(g)}</div></div>
           <div class="stat"><div class="k">Model side</div><div class="v">${sc ? esc(abbr(sc.sideTeam)) + ' ' + fmtLine(sc.sideLine) : '–'}</div>
             <div class="s">The bet the model leans toward at the posted line</div></div>
           <div class="stat"><div class="k">Model edge</div><div class="v ${sc ? (sc.ae >= 7 ? 'g7' : sc.ae >= 5 ? 'g5' : '') : ''}">${sc ? num(sc.ae, 1) + ' pts' : '–'}</div>
@@ -391,6 +425,13 @@
     bindInjuries(g); bindWeather(g);
   }
 
+  function lineHistory(g) {
+    const mi = moveInfo(g, true);
+    if (!mi) return '';
+    const day = (ts) => new Date(ts).toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short' });
+    const dir = Math.abs(mi.mv) < 0.01 ? 'no move yet' : `${trim(Math.abs(mi.mv))} ${mi.mv > 0 ? '<span class="good">toward</span>' : '<span class="bad">away from</span>'} model`;
+    return `<br>Opened ${esc(mi.openedTxt)} (${day(mi.ts)}), ${dir}`;
+  }
   function ladderHtml(g, sc) {
     const s = sc.sideLine;
     const base = sc.p * (1 - (Number.isInteger(s) ? pushRate(Math.abs(s)) : 0));   // unconditional chance of a win at the posted line
@@ -548,7 +589,7 @@
     const wr = rec(rows), w5 = rec(rows.filter((x) => Math.abs(x.edge) >= 5));
     const byWeek = weeks.map((w) => { const xs = R.filter((r) => r.wk === w); const a = rec(xs), f = rec(xs.filter((x) => Math.abs(x.edge) >= 5)), t = rec(xs.filter((x) => x.total_result != null), 'total_result'); return { w, a, f, t }; });
     const posted = rows.filter((r) => r.posted);
-    el.innerHTML = `
+    el.innerHTML = clvHtml(R) + `
       <div class="card">
         <div class="cardhead"><div><h2>${S.site.season} season so far</h2></div></div>
         <div class="stats">
@@ -583,6 +624,51 @@
       </div>`;
     $('#rw').onchange = (e) => { UI.resWeek = +e.target.value; renderResults(); };
     el.querySelectorAll('[data-wk]').forEach((t) => (t.onclick = () => { UI.resWeek = +t.dataset.wk; renderResults(); }));
+  }
+  // closing line value: did DraftKings move toward the side the model liked when the line was posted?
+  function clvRows(R) {
+    return R.filter((r) => r.posted && r.posted.spread != null && r.posted.model_margin != null).map((r) => {
+      const p = r.posted;
+      const e0 = p.model_margin + p.spread;
+      const homeSide = e0 >= 0;
+      const posted = homeSide ? p.spread : -p.spread;
+      const close = homeSide ? r.line : -r.line;
+      const mv = posted - close;
+      const margin = homeSide ? r.score_home - r.score_away : r.score_away - r.score_home;
+      const cov = margin + posted;      // bet placed at the posted line
+      return { wk: r.wk, ae: Math.abs(e0), mv, win: cov === 0 ? null : cov > 0 };
+    });
+  }
+  function clvHtml(R) {
+    const X = clvRows(R);
+    const head = `<div class="cardhead"><div><h2>Line movement scorecard</h2></div></div>
+      <p class="lead">Did DraftKings move toward the side the model liked when the line was first posted? This is the fastest honest test of a model: it settles in a few hundred games, while win-loss needs thousands. Healthy looks like more than half moving toward the model, with a bigger share on the 5+ and 7+ flags.</p>`;
+    if (!X.length) return `<div class="card">${head}<p class="empty">Starts filling in as this week's tracked games go final. Every game the daily job saw a DraftKings line for is counted.</p></div>`;
+    const sum = (xs) => {
+      const t = xs.filter((x) => x.mv > 0.01).length, a = xs.filter((x) => x.mv < -0.01).length, n = xs.length;
+      const avg = n ? xs.reduce((s, x) => s + x.mv, 0) / n : 0;
+      const moved = t + a;
+      return { n, t, a, nm: n - moved, share: moved ? t / moved : null, avg };
+    };
+    const rec = (xs) => { const w = xs.filter((x) => x.win === true).length, l = xs.filter((x) => x.win === false).length; return `${w}-${l}${w + l ? ` <span class="dim">${pct(w / (w + l))}</span>` : ''}`; };
+    const all = sum(X), f5 = sum(X.filter((x) => x.ae >= 5)), f7 = sum(X.filter((x) => x.ae >= 7));
+    const tile = (k, s, sub) => `<div class="stat"><div class="k">${k}</div><div class="v ${s.share != null && s.share > 0.5 ? 'g7' : ''}">${s.share == null ? '–' : pct(s.share)}</div><div class="s">${s.t} toward, ${s.a} away, ${s.nm} no move${sub ? ' · ' + sub : ''}</div></div>`;
+    const tow = X.filter((x) => x.mv > 0.01), awy = X.filter((x) => x.mv < -0.01);
+    const weeks = [...new Set(X.map((x) => x.wk))].sort((a, b) => a - b);
+    return `<div class="card">${head}
+      <div class="stats">
+        ${tile('All tracked games', all)}
+        ${tile('5+ edge when posted', f5)}
+        ${tile('7+ edge when posted', f7)}
+        <div class="stat"><div class="k">Average move</div><div class="v ${all.avg > 0 ? 'g7' : ''}">${sgn(all.avg, 2)}</div><div class="s">Points per game, + is toward the model</div></div>
+        <div class="stat"><div class="k">Bet at the posted line</div><div class="v" style="font-size:22px">${rec(X)}</div><div class="s">Moved toward: ${rec(tow)} · away: ${rec(awy)}</div></div>
+      </div>
+      <div class="tblwrap"><table><thead><tr><th>Week</th><th class="num">Games</th><th class="num">Toward</th><th class="num">Away</th><th class="num">No move</th><th class="num">Toward share</th><th class="num">Avg move</th><th class="num">5+ toward / away</th></tr></thead><tbody>
+      ${weeks.map((w) => { const xs = X.filter((x) => x.wk === w), s = sum(xs), s5 = sum(xs.filter((x) => x.ae >= 5));
+        return `<tr><td>Week ${w}</td><td class="num">${s.n}</td><td class="num good">${s.t}</td><td class="num bad">${s.a}</td><td class="num dim">${s.nm}</td><td class="num">${s.share == null ? '–' : pct(s.share)}</td><td class="num">${sgn(s.avg, 2)}</td><td class="num">${s5.t} / ${s5.a}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      <p class="note">Toward share leaves out games where the line never moved. "Bet at the posted line" grades the model's side at the first DraftKings number the job saw, which is what you would have gotten by betting early. Tracking started week 7; earlier weeks were before the job existed.</p>
+    </div>`;
   }
   function resRow(r) {
     const homeSide = r.edge >= 0;

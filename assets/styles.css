@@ -205,3 +205,6 @@ tr.click:hover td { background: var(--accent-soft); }
 
 td.mcell { white-space: normal; min-width: 210px; max-width: 330px; }
 td.mcell .tag { margin-top: 2px; }
+
+.filters input[type="checkbox"] { min-width: 0; }
+.opened { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 3px; }
