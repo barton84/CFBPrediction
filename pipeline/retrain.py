@@ -99,12 +99,13 @@ def main(skip_fetch=False):
         json.dump(out, open(f'{STATE}/prior_{target}.json', 'w'))
         print('saved prior for', target)
 
-    # weather: backfill history and refit (needs open internet; skipped quietly if it fails)
+    # weather: save the list of games to collect; the separate weather step fetches them in
+    # paced slices (see weather.py) so a slow or throttled weather service never blocks this job
     try:
         import weather
-        weather.backfill_and_fit(WORK, RAW, DATA)
+        weather.save_targets(WORK, STATE, DATA)
     except Exception as e:
-        print('weather refit skipped:', e)
+        print('weather targets skipped:', e)
 
 
 if __name__ == '__main__':

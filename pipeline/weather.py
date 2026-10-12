@@ -19,19 +19,19 @@ ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive'
 HOURLY = 'temperature_2m,precipitation,rain,snowfall,wind_speed_10m,wind_gusts_10m'
 
 
-def _call(base, lats, lons, start, end):
+def _call(base, lats, lons, start, end, tries=2, timeout=30):
     q = {'latitude': ','.join(f'{x:.4f}' for x in lats), 'longitude': ','.join(f'{x:.4f}' for x in lons),
          'hourly': HOURLY, 'temperature_unit': 'fahrenheit', 'wind_speed_unit': 'mph', 'precipitation_unit': 'inch',
          'timezone': 'GMT', 'start_date': start, 'end_date': end}
     url = base + '?' + urllib.parse.urlencode(q)
-    for i in range(4):
+    for i in range(tries):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'cfb-prediction-model'}), timeout=60) as r:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'cfb-prediction-model'}), timeout=timeout) as r:
                 js = json.loads(r.read().decode())
             return js if isinstance(js, list) else [js]
         except Exception as e:
             print('  weather retry', i + 1, e, flush=True)
-            time.sleep(3 * (i + 1))
+            time.sleep(10 * (i + 1))
     return None
 
 
@@ -65,27 +65,42 @@ def _window(js, kickoff_utc):
             'snow_in': float(np.nansum(arr('snowfall')))}
 
 
-def fetch_for(games, base=FORECAST, batch=50):
-    """games: DataFrame with game_id, g_lat, g_lon, start_date (UTC ISO). Returns {game_id: weather}."""
+def fetch_for(games, base=FORECAST, batch=20, budget_s=None, max_fail=3, on_progress=None):
+    """games: DataFrame with game_id, g_lat, g_lon, start_date (UTC ISO). Returns {game_id: weather}.
+    Paced to stay well under Open-Meteo's free limits (about 400 locations a minute), stops after a
+    few failures in a row or when the time budget runs out, and returns whatever it got."""
     out = {}
     if not reachable(base):
         print('weather service not reachable; skipping')
         return out
+    t0 = time.time()
+    fails = 0
     g = games.dropna(subset=['g_lat', 'g_lon']).copy()
     g['ts'] = pd.to_datetime(g.start_date, utc=True, format='ISO8601')
     g['day'] = g.ts.dt.strftime('%Y-%m-%d')
     for day, x in g.groupby('day'):
         end = (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
         for i in range(0, len(x), batch):
+            if budget_s and time.time() - t0 > budget_s:
+                print('weather: time budget used, stopping for now', flush=True)
+                return out
             part = x.iloc[i:i + batch]
             js = _call(base, part.g_lat.values, part.g_lon.values, day, end)
             if not js:
+                fails += 1
+                if fails >= max_fail:
+                    print('weather: service is refusing requests, stopping for now', flush=True)
+                    return out
+                time.sleep(60)
                 continue
+            fails = 0
             for (gid, ts), w in zip(zip(part.game_id, part.ts), js):
                 r = _window(w, ts)
                 if r:
                     out[int(gid)] = r
-            time.sleep(0.3)
+            if on_progress:
+                on_progress(out)
+            time.sleep(max(0.5, len(part) * 60 / 400))
     return out
 
 
@@ -102,46 +117,91 @@ def adjustment(w, coefs):
     return float(sum(parts.values())), parts
 
 
-def backfill_and_fit(work, raw, data_dir, seasons=(2022, 2023, 2024, 2025)):
-    import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model'))
-    cache = os.path.join(os.path.dirname(data_dir), 'state', 'weather_history.json')
-    hist = json.load(open(cache)) if os.path.exists(cache) else {}
-    g = pd.read_parquet(f'{work}/games.parquet')
-    s = pd.read_parquet(f'{work}/situ.parquet')
-    g = g.merge(s, on='game_id')
-    g = g[g.season.isin(seasons) & (g.home_division == 'fbs') & (g.away_division == 'fbs') & (~g.dome) & g.g_lat.notna()]
-    todo = g[~g.game_id.astype(str).isin(hist.keys())]
-    print('weather backfill: need', len(todo), 'games', flush=True)
-    if len(todo) and not reachable(ARCHIVE):
-        raise RuntimeError('Open-Meteo archive not reachable from here')
-    if len(todo):
-        got = fetch_for(todo[['game_id', 'g_lat', 'g_lon', 'start_date']], base=ARCHIVE)
-        hist.update({str(k): v for k, v in got.items()})
-        json.dump(hist, open(cache, 'w'))
-    # residual of the no-weather total model on these games
-    model = json.load(open(os.path.join(data_dir, 'model.json')))
+TARGETS = 'weather_targets.json'
+HISTORY = 'weather_history.json'
+
+
+def save_targets(work, state_dir, data_dir, seasons=(2022, 2023, 2024, 2025)):
+    """Called by retrain: the outdoor games to collect weather for, with the no-weather total
+    model's miss on each, so the fit later needs nothing but this small file."""
     import train
+    model = json.load(open(os.path.join(data_dir, 'model.json')))
     d = train.load_frame()
-    d = d[d.game_id.isin([int(k) for k in hist]) & d.total.notna()]
-    co = np.array(model['total']['coef'])
-    X = np.c_[d[model['total']['features']].fillna(d[model['total']['features']].mean()).values, np.ones(len(d))]
-    d['resid'] = d.total - (X @ co + model['total']['median_offset'])
-    w = pd.DataFrame([hist[str(i)] for i in d.game_id])
-    d = d.reset_index(drop=True)
+    d = d[d.season.isin(seasons) & d.total.notna() & (~d.dome.fillna(False).astype(bool)) & d.g_lat.notna()]
+    f = model['total']['features']
+    X = np.c_[d[f].fillna(d[f].mean()).values, np.ones(len(d))]
+    d['resid'] = d.total - (X @ np.array(model['total']['coef']) + model['total']['median_offset'])
+    rows = [{'game_id': int(r.game_id), 'lat': round(float(r.g_lat), 4), 'lon': round(float(r.g_lon), 4),
+             'start': r.start_date, 'resid': round(float(r.resid), 2), 'season': int(r.season)} for r in d.itertuples()]
+    json.dump(rows, open(os.path.join(state_dir, TARGETS), 'w'))
+    print('weather targets saved:', len(rows), 'games')
+
+
+def backfill(state_dir, data_dir, budget_s=240):
+    """Collect a slice of historical weather (saved as it goes) and refit once coverage is high.
+    Runs inside both workflows; a few runs finish the whole backfill."""
+    tp = os.path.join(state_dir, TARGETS)
+    if not os.path.exists(tp):
+        print('no weather targets yet; run the retrain workflow first')
+        return
+    targets = pd.DataFrame(json.load(open(tp)))
+    hp = os.path.join(state_dir, HISTORY)
+    hist = json.load(open(hp)) if os.path.exists(hp) else {}
+    todo = targets[~targets.game_id.astype(str).isin(hist.keys())]
+    print(f'weather history: {len(targets) - len(todo)} of {len(targets)} games collected', flush=True)
+    if len(todo):
+        def save(got):
+            hist.update({str(k): v for k, v in got.items()})
+            json.dump(hist, open(hp, 'w'))
+        g = todo.rename(columns={'lat': 'g_lat', 'lon': 'g_lon', 'start': 'start_date'})
+        save(fetch_for(g[['game_id', 'g_lat', 'g_lon', 'start_date']], base=ARCHIVE, budget_s=budget_s, on_progress=save))
+        print(f'weather history now: {sum(1 for k in targets.game_id if str(k) in hist)} of {len(targets)}', flush=True)
+    have = targets[targets.game_id.astype(str).isin(hist.keys())]
+    if len(have) < 0.9 * len(targets):
+        print('not enough weather yet to refit; keeping current values')
+        return
+    fit(have, hist, data_dir)
+
+
+def fit(have, hist, data_dir):
+    w = pd.DataFrame([hist[str(i)] for i in have.game_id])
+    resid = have.resid.values
     F = pd.DataFrame({'wind': (w.wind_mph - 10).clip(lower=0), 'rain': ((w.precip_in >= 0.1) & (w.snow_in < 0.1)).astype(float),
                       'snow': (w.snow_in >= 0.1).astype(float), 'cold': (w.temp_f < 32).astype(float)})
-    ok = F.notna().all(axis=1) & d.resid.notna()
-    A = np.c_[F[ok].values, np.ones(ok.sum())]
-    b = np.linalg.lstsq(A, d.resid[ok].values, rcond=None)[0]
-    res = d.resid[ok].values - A @ b
-    se = np.sqrt(np.diag(np.linalg.pinv(A.T @ A)) * res.var())
+    ok = (F.notna().all(axis=1) & ~np.isnan(resid)).values
     names = ['wind_per_mph_over_10', 'rain', 'snow', 'cold_below_32']
-    fitted = {n: round(float(v), 3) for n, v in zip(names, b[:4])}
-    model['total']['weather'] = {'fitted': True, **fitted, 'n_games': int(ok.sum()),
-                                 't_stats': {n: round(float(v / e), 2) for n, v, e in zip(names, b[:4], se[:4])},
+    cols = ['wind', 'rain', 'snow', 'cold']
+    # only fit a term with enough games behind it; rare ones (snow) keep the starting value
+    use = [c for c in cols if (F[c][ok] > 0).sum() >= 15]
+    A = np.c_[F.loc[ok, use].values, np.ones(ok.sum())]
+    b = np.linalg.lstsq(A, resid[ok], rcond=None)[0]
+    res = resid[ok] - A @ b
+    se = np.sqrt(np.diag(np.linalg.pinv(A.T @ A)) * res.var())
+    seasons = sorted(have.season.unique())
+    mp = os.path.join(data_dir, 'model.json')
+    model = json.load(open(mp))
+    old = model['total']['weather']
+    vals, ts = {}, {}
+    for n, c in zip(names, cols):
+        if c in use:
+            i = use.index(c)
+            vals[n] = round(float(b[i]), 3)
+            ts[n] = round(float(b[i] / se[i]), 2) if se[i] > 0 else None
+        else:
+            vals[n] = old.get(n)
+            ts[n] = None
+    model['total']['weather'] = {'fitted': True, **vals, 'n_games': int(ok.sum()), 't_stats': ts,
                                  'counts': {'wind_over_15': int((w.wind_mph > 15).sum()), 'rain': int(F.rain.sum()),
                                             'snow': int(F.snow.sum()), 'cold': int(F.cold.sum())},
-                                 'note': f'Fitted on {int(ok.sum())} outdoor FBS games, {seasons[0]}-{seasons[-1]}, Open-Meteo historical weather.'}
-    json.dump(model, open(os.path.join(data_dir, 'model.json'), 'w'), indent=1)
+                                 'not_fitted_terms': [n for n, c in zip(names, cols) if c not in use],
+                                 'note': f'Fitted on {int(ok.sum())} outdoor FBS games, {seasons[0]}-{seasons[-1]}, Open-Meteo historical weather.'
+                                         + (' Too few snow games to fit; snow keeps the research value.' if 'snow' not in use else '')}
+    json.dump(model, open(mp, 'w'), indent=1)
     print('weather fitted:', model['total']['weather'])
+
+
+if __name__ == '__main__':
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    budget = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1] == '--backfill' else 240
+    backfill(os.path.join(root, 'state'), os.path.join(root, 'data'), budget_s=budget)

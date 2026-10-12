@@ -1,0 +1,44 @@
+name: Daily update
+
+on:
+  schedule:
+    - cron: "45 11 * * *"     # every day, 6:45 AM Central (5:45 after the November time change)
+    - cron: "0 21 * * 5"      # Friday afternoon, catch line moves before Saturday
+    - cron: "15 15 * * 6"     # Saturday 10:15 AM Central, game-day lines and weather
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run daily job
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python pipeline/run_daily.py
+      - name: Weather history (a few minutes a day until complete)
+        continue-on-error: true
+        timeout-minutes: 8
+        run: python pipeline/weather.py --backfill 240
+      - name: Commit data
+        run: |
+          git config user.name "cfb-model-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data state
+          git diff --cached --quiet || git commit -m "Daily update $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git push
