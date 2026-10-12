@@ -1,0 +1,42 @@
+name: Retrain model
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 12 10 8 *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Retrain
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python pipeline/retrain.py
+      - name: Refresh this week
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python pipeline/run_daily.py
+      - name: Commit
+        run: |
+          git config user.name "cfb-model-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data state
+          git diff --cached --quiet || git commit -m "Retrain $(date -u +'%Y-%m-%d')"
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git push
