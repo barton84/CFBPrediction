@@ -271,3 +271,22 @@ td.mcell .tag { margin-top: 2px; }
   .filters .check { flex: 1 1 100%; }
 }
 .ggrid span.pill, .ggrid span.dim { display: inline-block; font-family: var(--mono); font-size: 11px; text-transform: none; letter-spacing: 0; }
+
+/* header actions on the right */
+.top { align-items: flex-start; }
+.top .title { flex: 1; min-width: 0; }
+.actions { display: flex; gap: 8px; flex: none; margin-left: auto; padding-top: 4px; }
+/* finished games */
+tr.done td { opacity: 0.72; }
+tr.done:hover td { opacity: 1; }
+tr.divider td { background: none !important; box-shadow: none !important; cursor: default; font-family: var(--mono); font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); padding: 18px 8px 8px; border-bottom: 1px solid var(--line); }
+tr.divider:hover td { background: none; }
+.mdivider { font-family: var(--mono); font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); padding: 10px 2px 2px; border-top: 1px solid var(--line); margin-top: 4px; }
+.gcard.done { opacity: 0.8; }
+.pill.win, .pill.loss, .pill.push { font-weight: 600; }
+@media (max-width: 720px) {
+  .actions { gap: 6px; padding-top: 2px; }
+  .actions .btn { padding: 7px; }
+  .actions .blbl { display: none; }
+  .actions .btn svg { width: 16px; height: 16px; }
+}

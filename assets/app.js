@@ -188,6 +188,19 @@
   }
 
   // ---------- header ----------
+  // warnings that only appear when something has stopped updating
+  function staleChips() {
+    const now = Date.now(), H = 3600 * 1000, out = [];
+    const day = (t) => new Date(t).toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric' });
+    const built = new Date(S.site.built).getTime();
+    if (now - built > 30 * H) out.push(`<span class="chip warn" title="The daily GitHub job normally runs every morning. Check the Actions tab for a failed run.">Not updated since ${day(built)}</span>`);
+    const stuck = S.week.games.filter((g) => !g.final && g.kickoff && now - new Date(g.kickoff).getTime() > 36 * H);
+    if (stuck.length) {
+      const first = Math.min(...stuck.map((g) => new Date(g.kickoff).getTime()));
+      out.push(`<span class="chip warn" title="Games that kicked off more than 36 hours ago have no final score yet, so the play-by-play feed is behind and ratings are not updating.">${stuck.length} game${stuck.length > 1 ? 's' : ''} since ${day(first)} missing results</span>`);
+    }
+    return out.join('');
+  }
   function renderHeader() {
     const s = S.site;
     $('#sub').textContent = `${s.season} season · ratings through week ${s.ratings_through} · FBS play-by-play · built ${builtStamp(s.built)}`;
@@ -202,10 +215,10 @@
       <span class="chip g7">${n7} at 7+</span>
       <span class="chip">Season ATS ${t.w}-${t.l}</span>
       <span class="chip">5+ ${t5.w}-${t5.l} · 7+ ${t7.w}-${t7.l}</span>
-      <span class="chip">Lines: ${lineSrc}</span>
-      <span class="spacer"></span>
-      <button class="btn" id="howBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h7"/></svg>How it works</button>
-      <button class="btn" id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span id="themeLbl"></span></button>`;
+      <span class="chip">Lines: ${lineSrc}</span>${staleChips()}`;
+    $('#actions').innerHTML = `
+      <button class="btn" id="howBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h7"/></svg><span class="blbl">How it works</span></button>
+      <button class="btn" id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span class="blbl" id="themeLbl"></span></button>`;
     const light = document.documentElement.getAttribute('data-theme') === 'light';
     $('#themeLbl').textContent = light ? 'Dark mode' : 'Light mode';
     $('#themeBtn').onclick = () => {
@@ -269,6 +282,7 @@
     if (UI.toward) rows = rows.filter(({ g }) => { const mi = !g.final && moveInfo(g, isSpread); return mi && mi.mv > 0; });
     const k = UI.wsort.k, d = UI.wsort.d;
     rows.sort((A, B) => {
+      if (A.g.final !== B.g.final) return A.g.final ? 1 : -1;
       if (k === 'edge') return d * (((A.c && !A.g.final) ? A.c.ae : -1) - ((B.c && !B.g.final) ? B.c.ae : -1));
       return d * (new Date(A.g.kickoff) - new Date(B.g.kickoff));
     });
@@ -298,13 +312,13 @@
           <label class="check"><input type="checkbox" id="wtow" ${UI.toward ? 'checked' : ''}> Only lines moving toward the model</label>
         </div>
         ${isMobile() ? `<div class="msort">Sort: <button class="${UI.wsort.k === 'kickoff' ? 'on' : ''}" data-ms="kickoff">Kickoff</button><button class="${UI.wsort.k === 'edge' ? 'on' : ''}" data-ms="edge">Biggest edge</button></div>
-        <div class="mlist">${rows.map(({ g, c }) => weekCard(g, c, isSpread)).join('') || '<p class="empty">No games match.</p>'}</div>` : `<div class="tblwrap"><table>
+        <div class="mlist">${rows.map(({ g, c }, i) => (g.final && (i === 0 || !rows[i - 1].g.final) ? '<div class="mdivider">Completed games</div>' : '') + weekCard(g, c, isSpread)).join('') || '<p class="empty">No games match.</p>'}</div>` : `<div class="tblwrap"><table>
           <thead><tr>
             <th>Matchup</th><th class="sort" data-s="kickoff">Kickoff ${sortArr('kickoff')}</th>
             <th class="num">Line</th><th>Move</th><th class="num">Model</th><th>Model side</th>
             <th class="num sort" data-s="edge">Edge ${sortArr('edge')}</th><th>${isSpread ? 'Cover chance' : 'Hit chance'}</th><th></th><th></th>
           </tr></thead>
-          <tbody>${rows.map(({ g, c }) => weekRow(g, c, isSpread)).join('') || `<tr><td colspan="10" class="empty">No games match.</td></tr>`}</tbody>
+          <tbody>${rows.map(({ g, c }, i) => (g.final && (i === 0 || !rows[i - 1].g.final) ? `<tr class="divider"><td colspan="10">Completed games</td></tr>` : '') + weekRow(g, c, isSpread)).join('') || `<tr><td colspan="10" class="empty">No games match.</td></tr>`}</tbody>
         </table></div>`}
         <p class="note">Kickoff times are Central. ${weekFootnote()}</p>
       </div>`;
@@ -334,18 +348,25 @@
       if (c && !g.final) { side = `${c.over ? 'Over' : 'Under'} ${trim(L.total)}`; edge = num(c.ae, 1); ch = pct(c.p); }
     }
     const tags = matchupTags(g);
-    const cls = !g.final && c ? flagOf(c.ae) : '';
+    let cls = !g.final && c ? flagOf(c.ae) : '';
+    let topRight = !g.final && c ? flagHtml(c.ae) : '';
+    if (g.final) {
+      const gr = gradeOf(g, isSpread);
+      side = gr ? esc(gr.side) : '–'; edge = gr ? num(gr.ae, 1) : '–'; ch = gr ? resPill(gr.res) : '–';
+      topRight = `<span class="final">Final ${g.score.away}-${g.score.home}</span>`;
+      cls = 'done';
+    }
     const mv = g.final ? '' : moveHtml(moveInfo(g, isSpread));
     return `<div class="gcard ${cls}" data-open="${g.id}">
       <div class="gtop"><div class="gteams"><div>${rk(g.away)}<b>${esc(g.away.school)}</b></div><div><span class="at">${g.neutral ? 'vs' : '@'}</span> ${rk(g.home)}<b>${esc(g.home.school)}</b></div></div>
-        <div class="gflag">${!g.final && c ? flagHtml(c.ae) : ''}${g.final ? `<span class="final">final ${g.score.away}-${g.score.home}</span>` : ''}</div></div>
+        <div class="gflag">${topRight}</div></div>
       <div class="gmeta">${ctShort(g.kickoff, g.tbd)} CT${tags ? ' ' + tags : ''}</div>
       <div class="ggrid">
         <div><span>Line${L ? ' · ' + (L.source === 'DK' ? 'DK' : 'ESPN') : ''}</span><b>${line}</b></div>
         <div><span>Model</span><b>${model}</b></div>
         <div><span>Edge</span><b>${edge}</b></div>
         <div class="wide"><span>Model side</span><b class="acc">${side}</b></div>
-        <div><span>${isSpread ? 'Cover' : 'Hit'}</span><b>${ch}</b></div>
+        <div><span>${g.final ? 'Result' : isSpread ? 'Cover' : 'Hit'}</span><b>${ch}</b></div>
       </div>
       ${mv && !mv.includes('class="dim"') ? `<div class="gmove">${mv}</div>` : ''}
     </div>`;
@@ -375,14 +396,38 @@
         flag = flagHtml(c.ae);
       }
     }
+    let when = ctShort(g.kickoff, g.tbd);
+    let cls = !g.final && c ? flagOf(c.ae) : '';
     if (g.final) {
-      side = `<span class="final">final ${g.score.away}-${g.score.home}</span>`;
+      const gr = gradeOf(g, isSpread);
+      when = `<span class="final">Final ${g.score.away}-${g.score.home}</span>`;
+      side = gr ? `<b>${esc(gr.side)}</b>` : '<span class="dim">–</span>';
+      edge = gr ? num(gr.ae, 1) : '<span class="dim">–</span>';
+      ch = gr ? resPill(gr.res) : '<span class="dim">not graded</span>';
+      flag = gr ? flagHtml(gr.ae) : '';
+      cls = 'done';
     }
-    const cls = !g.final && c ? flagOf(c.ae) : '';
-    return `<tr class="${cls}"><td class="mcell">${matchup(g)}</td><td class="mono">${ctShort(g.kickoff, g.tbd)}</td>
+    return `<tr class="${cls} click" data-open="${g.id}"><td class="mcell">${matchup(g)}</td><td class="mono">${when}</td>
       <td class="num">${line} ${L ? src : ''}</td><td>${g.final ? '<span class="dim">–</span>' : moveHtml(moveInfo(g, isSpread))}</td><td class="num">${model}</td><td>${side}</td>
       <td class="num">${edge}</td><td class="mono">${ch}</td><td>${flag}</td>
       <td><button class="open" data-open="${g.id}">Open</button></td></tr>`;
+  }
+  // how a finished game graded, from the same record the Results tab uses
+  function gradeOf(g, isSpread) {
+    const r = S.resultsById[g.id];
+    if (!r) return null;
+    if (isSpread) {
+      const homeSide = r.edge >= 0;
+      return { side: `${homeSide ? r.home_abbr : r.away_abbr} ${fmtLine(homeSide ? r.line : -r.line)}`, ae: Math.abs(r.edge),
+        res: r.push ? 'push' : r.result ? 'win' : 'loss' };
+    }
+    if (r.total_result == null || r.total_line == null) return null;
+    const tr = (r.score_home + r.score_away) === r.total_line;
+    return { side: `${r.total_edge >= 0 ? 'Over' : 'Under'} ${trim(r.total_line)}`, ae: Math.abs(r.total_edge),
+      res: tr ? 'push' : r.total_result ? 'win' : 'loss' };
+  }
+  function resPill(res) {
+    return res === 'push' ? '<span class="pill push">Push</span>' : res === 'win' ? '<span class="pill win">Covered</span>' : '<span class="pill loss">Loss</span>';
   }
   function weekFootnote() {
     const s = S.site;
@@ -661,10 +706,22 @@
         <div class="card">${marginsHtml()}</div>
       </div>`;
     $('#rw').onchange = (e) => { UI.resWeek = +e.target.value; renderResults(); };
+    el.querySelectorAll('#clvSeg button').forEach((b) => (b.onclick = () => { UI.clvKind = b.dataset.k; renderResults(); }));
     el.querySelectorAll('[data-wk]').forEach((t) => (t.onclick = () => { UI.resWeek = +t.dataset.wk; renderResults(); }));
   }
   // closing line value: did DraftKings move toward the side the model liked when the line was posted?
-  function clvRows(R) {
+  function clvRows(R, kind) {
+    if (kind === 'total') {
+      return R.filter((r) => r.posted && r.posted.total != null && r.posted.model_total != null && r.total_line != null).map((r) => {
+        const p = r.posted;
+        const e0 = p.model_total - p.total;
+        const over = e0 >= 0;
+        const mv = over ? r.total_line - p.total : p.total - r.total_line;   // + : the market moved toward the model
+        const tot = r.score_home + r.score_away;
+        const d = over ? tot - p.total : p.total - tot;                     // bet placed at the posted total
+        return { wk: r.wk, ae: Math.abs(e0), mv, win: d === 0 ? null : d > 0 };
+      });
+    }
     return R.filter((r) => r.posted && r.posted.spread != null && r.posted.model_margin != null).map((r) => {
       const p = r.posted;
       const e0 = p.model_margin + p.spread;
@@ -678,10 +735,12 @@
     });
   }
   function clvHtml(R) {
-    const X = clvRows(R);
-    const head = `<div class="cardhead"><div><h2>Line movement scorecard</h2></div></div>
-      <p class="lead">Did DraftKings move toward the side the model liked when the line was first posted? This is the fastest honest test of a model: it settles in a few hundred games, while win-loss needs thousands. Healthy looks like more than half moving toward the model, with a bigger share on the 5+ and 7+ flags.</p>`;
-    if (!X.length) return `<div class="card">${head}<p class="empty">Starts filling in as this week's tracked games go final. Every game the daily job saw a DraftKings line for is counted.</p></div>`;
+    const kind = UI.clvKind || 'spread';
+    const X = clvRows(R, kind);
+    const head = `<div class="cardhead"><div><h2>Line movement scorecard</h2></div><span class="spacer"></span>
+      <div class="seg" id="clvSeg"><button data-k="spread" class="${kind === 'spread' ? 'on' : ''}">Spreads</button><button data-k="total" class="${kind === 'total' ? 'on' : ''}">Totals</button></div></div>
+      <p class="lead">Did DraftKings move toward the ${kind === 'total' ? 'over or under' : 'side'} the model liked when the ${kind === 'total' ? 'total' : 'line'} was first posted? This is the fastest honest test of a model: it settles in a few hundred games, while win-loss needs thousands. Healthy looks like more than half moving toward the model, with a bigger share on the 5+ and 7+ flags.</p>`;
+    if (!X.length) return `<div class="card">${head}<p class="empty">Fills in as tracked games go final. Every game the daily job saw a DraftKings line for is counted.</p></div>`;
     const sum = (xs) => {
       const t = xs.filter((x) => x.mv > 0.01).length, a = xs.filter((x) => x.mv < -0.01).length, n = xs.length;
       const avg = n ? xs.reduce((s, x) => s + x.mv, 0) / n : 0;
@@ -714,9 +773,9 @@
     const sideLine = homeSide ? r.line : -r.line;
     const favAbbr = r.line <= 0 ? r.home_abbr : r.away_abbr;
     const modelFav = r.model_margin >= 0 ? r.home_abbr : r.away_abbr;
-    const res = r.push ? '<span class="pill push">Push</span>' : r.result ? '<span class="pill win">Win</span>' : '<span class="pill loss">Loss</span>';
+    const res = resPill(r.push ? 'push' : r.result ? 'win' : 'loss');
     const ae = Math.abs(r.edge);
-    const ou = r.total_result == null ? '<span class="dim">–</span>' : `${r.total_edge >= 0 ? 'O' : 'U'} ${r.total_result ? '<span class="pill win">W</span>' : '<span class="pill loss">L</span>'}`;
+    const ou = r.total_result == null ? '<span class="dim">–</span>' : `${r.total_edge >= 0 ? 'O' : 'U'} ${resPill(r.total_result ? 'win' : 'loss')}`;
     return `<tr class="${flagOf(ae)}"><td><span class="mt">${esc(r.away)}<span class="at">${r.neutral ? 'vs' : '@'}</span>${esc(r.home)}</span></td>
       <td class="num">${esc(favAbbr)} ${fmtLine(-Math.abs(r.line))}</td><td><span class="tag dk">${esc(r.line_src)}</span></td>
       <td class="num">${esc(modelFav)} ${fmtLine(-Math.abs(r.model_margin))}</td><td><b>${esc(sideAbbr)} ${fmtLine(sideLine)}</b></td>
@@ -729,9 +788,9 @@
     const sideLine = homeSide ? r.line : -r.line;
     const favAbbr = r.line <= 0 ? r.home_abbr : r.away_abbr;
     const modelFav = r.model_margin >= 0 ? r.home_abbr : r.away_abbr;
-    const res = r.push ? '<span class="pill push">Push</span>' : r.result ? '<span class="pill win">Win</span>' : '<span class="pill loss">Loss</span>';
+    const res = resPill(r.push ? 'push' : r.result ? 'win' : 'loss');
     const ae = Math.abs(r.edge);
-    const ou = r.total_result == null ? '–' : `${r.total_edge >= 0 ? 'Over' : 'Under'} ${trim(r.total_line)} ${r.total_result ? '<span class="pill win">W</span>' : '<span class="pill loss">L</span>'}`;
+    const ou = r.total_result == null ? '–' : `${r.total_edge >= 0 ? 'Over' : 'Under'} ${trim(r.total_line)} ${resPill(r.total_result ? 'win' : 'loss')}`;
     return `<div class="gcard ${flagOf(ae)}">
       <div class="gtop"><div class="gteams"><div><b>${esc(r.away)}</b> <span class="sc">${r.score_away}</span></div><div><span class="at">${r.neutral ? 'vs' : '@'}</span> <b>${esc(r.home)}</b> <span class="sc">${r.score_home}</span></div></div><div class="gflag">${res}</div></div>
       <div class="ggrid">
@@ -921,6 +980,7 @@
         ['site.json', 'week.json', 'ratings.json', 'results.json', 'model.json', 'backtest.json', 'tests.json'].map(load));
       Object.assign(S, { site, week, ratings, results, model, backtest, tests });
       S.ratingsById = {}; ratings.teams.forEach((t) => (S.ratingsById[t.id] = t));
+      S.resultsById = {}; results.games.forEach((r) => (S.resultsById[r.id] = r));
     } catch (e) {
       $('#tab-week').innerHTML = `<div class="card empty">Could not load data (${esc(e.message)}). If this is a fresh deploy, run the daily workflow once.</div>`;
       return;
