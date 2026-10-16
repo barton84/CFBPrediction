@@ -2,9 +2,11 @@ name: Daily update
 
 on:
   schedule:
-    - cron: "45 11 * * *"
-    - cron: "0 21 * * 5"
-    - cron: "15 15 * * 6"
+    - cron: "45 11 * * *"     # every day, 6:45 AM Central (5:45 after the November time change)
+    - cron: "0 21 * * 5"      # Friday afternoon, catch line moves before Saturday
+    - cron: "15 15 * * 6"     # Saturday 10:15 AM Central, game-day lines and weather
+    - cron: "0 19 * * 6"      # Saturday 2:00 PM Central, lines for afternoon kickoffs
+    - cron: "30 22 * * 6"     # Saturday 5:30 PM Central, lines for night kickoffs
   workflow_dispatch: {}
 
 permissions:
@@ -30,6 +32,10 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
         run: python pipeline/run_daily.py
+      - name: Weather history (a few minutes a day until complete)
+        continue-on-error: true
+        timeout-minutes: 8
+        run: python pipeline/weather.py --backfill 240
       - name: Commit data
         run: |
           git config user.name "cfb-model-bot"
