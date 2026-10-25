@@ -95,12 +95,28 @@
   "hit_slope": 0.03229707008145714,
   "qb_change_points": -1.7604263988002073,
   "weather": {
-   "fitted": false,
-   "wind_per_mph_over_10": -0.25,
-   "rain": -1.0,
+   "fitted": true,
+   "wind_per_mph_over_10": -0.555,
+   "rain": -1.476,
    "snow": -2.5,
-   "cold_below_32": -1.0,
-   "note": "Starting values from published research. Refit automatically once the weather backfill has run."
+   "cold_below_32": -2.311,
+   "n_games": 2921,
+   "t_stats": {
+    "wind_per_mph_over_10": -2.74,
+    "rain": -1.0,
+    "snow": null,
+    "cold_below_32": -1.05
+   },
+   "counts": {
+    "wind_over_15": 80,
+    "rain": 122,
+    "snow": 11,
+    "cold": 54
+   },
+   "not_fitted_terms": [
+    "snow"
+   ],
+   "note": "Fitted on 2921 outdoor FBS games, 2022-2025, Open-Meteo historical weather. Too few snow games to fit; snow keeps the research value."
   }
  },
  "key_margins": {
