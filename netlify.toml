@@ -1,8 +1,7 @@
 [build]
   publish = "."
   command = ""
-
-[[headers]]
-  for = "/data/*"
-  [headers.values]
-    Cache-Control = "public, max-age=300"
+  # Skip the deploy when a commit only changes data/ or state/ (the daily job's commits).
+  # The site reads its data from GitHub directly, so those changes show up without a deploy.
+  # Exit code 0 = skip, 1 = build. Each production deploy costs Netlify credits.
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ':(exclude)data' ':(exclude)state'"

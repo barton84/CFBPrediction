@@ -28,10 +28,19 @@
   };
   const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 
+  // Data is read straight from the GitHub repo, so the daily job's commits show up without a Netlify
+  // redeploy (each deploy costs Netlify credits). Falls back to the copy deployed with the site.
+  const DATA_SOURCES = ['https://raw.githubusercontent.com/barton84/CFBPrediction/main/data/', 'data/'];
   async function load(name) {
-    const r = await fetch('data/' + name + '?v=' + Date.now());
-    if (!r.ok) throw new Error(name + ' ' + r.status);
-    return r.json();
+    let lastErr;
+    for (const base of DATA_SOURCES) {
+      try {
+        const r = await fetch(base + name + '?v=' + Math.floor(Date.now() / 60000), { cache: 'no-cache' });
+        if (r.ok) return r.json();
+        lastErr = new Error(name + ' ' + r.status);
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
   }
 
   function ctTime(iso, tbd) {
@@ -147,6 +156,35 @@
     if (Math.abs(mi.mv) < 0.01) return `<span class="pill none">no move</span>`;
     const tw = mi.mv > 0;
     return `<span class="pill ${tw ? 'toward' : 'away'}">${tw ? '▲' : '▼'} ${trim(Math.abs(mi.mv))} ${tw ? 'toward' : 'away'}</span><div class="opened">opened ${esc(mi.openedTxt)}</div>`;
+  }
+  // market-anchored model: starts from the posted line, moves off it only where the stats add something
+  const ANCH_FLAG = 2;
+  function anchCalc(g) {
+    const A = S.anch, L = g.line;
+    if (!A || !g.feat || !L || L.spread == null) return null;
+    const b = g.wk <= 3 ? 0 : g.wk <= 6 ? 1 : 2;
+    const co = A.coef[String(b)];
+    let m = co[co.length - 1];
+    A.features.forEach((f, i) => { const v = f === 'mline' ? -L.spread : g.feat[f]; m += co[i] * (v == null ? 0 : v); });
+    const o = overrides(g), qb = S.model.spread.qb_change_points;
+    m += -qb * (o.qbHome ? 1 : 0) + qb * (o.qbAway ? 1 : 0);
+    const edge = m + L.spread, homeSide = edge >= 0;
+    return { m, edge, ae: Math.abs(edge), sideTeam: homeSide ? g.home : g.away, sideLine: homeSide ? L.spread : -L.spread,
+      p: Math.min(0.56, sigmoid(A.cover_slope * Math.abs(edge))) };
+  }
+  function anchCell(g) {
+    if (g.final) {
+      const r = S.resultsById[g.id];
+      if (!r || r.anch_edge == null) return '<span class="dim">–</span>';
+      const side = r.anch_edge >= 0 ? `${r.home_abbr} ${fmtLine(r.line)}` : `${r.away_abbr} ${fmtLine(-r.line)}`;
+      const lean = Math.abs(r.anch_edge) >= ANCH_FLAG;
+      return lean ? `<span title="Anchored lean: ${esc(side)}">${resPill(r.anch_result == null ? 'push' : r.anch_result ? 'win' : 'loss')}</span>` : `<span class="dim">${num(Math.abs(r.anch_edge), 1)}</span>`;
+    }
+    const a = anchCalc(g);
+    if (!a) return '<span class="dim">–</span>';
+    const lean = a.ae >= ANCH_FLAG;
+    return lean ? `<span class="flag fa" title="Market-anchored model leans ${esc(abbr(a.sideTeam))} ${fmtLine(a.sideLine)}">${esc(abbr(a.sideTeam))} ${num(a.ae, 1)}</span>`
+      : `<span class="dim" title="Market-anchored model: ${esc(abbr(a.sideTeam))} ${fmtLine(a.sideLine)}, under 2 points">${num(a.ae, 1)}</span>`;
   }
   function pushRate(k) { const r = S.model.push_rate || {}; return r[String(Math.round(k))] || 0; }
   function flagOf(ae) { return ae >= 7 ? 'f7' : ae >= 5 ? 'f5' : ''; }
@@ -278,7 +316,8 @@
     const q = UI.q.trim().toLowerCase();
     if (q) rows = rows.filter(({ g }) => (g.home.school + ' ' + g.away.school).toLowerCase().includes(q));
     if (UI.conf) rows = rows.filter(({ g }) => confOf(g.home.id) === UI.conf || confOf(g.away.id) === UI.conf);
-    if (UI.minEdge) rows = rows.filter(({ c, g }) => c && !g.final && c.ae >= UI.minEdge);
+    if (UI.minEdge === -2) rows = rows.filter(({ g }) => { if (g.final) { const r = S.resultsById[g.id]; return r && r.anch_edge != null && Math.abs(r.anch_edge) >= ANCH_FLAG; } const a = anchCalc(g); return a && a.ae >= ANCH_FLAG; });
+    else if (UI.minEdge) rows = rows.filter(({ c, g }) => c && !g.final && c.ae >= UI.minEdge);
     if (UI.toward) rows = rows.filter(({ g }) => { const mi = !g.final && moveInfo(g, isSpread); return mi && mi.mv > 0; });
     const k = UI.wsort.k, d = UI.wsort.d;
     rows.sort((A, B) => {
@@ -292,9 +331,10 @@
     const what = isSpread ? 'DraftKings line' : 'DraftKings total';
     const flagged = W.games.filter((g) => { const c = isSpread ? spreadCalc(g) : totalCalc(g); return !g.final && c && c.ae >= 5; });
     const nTow = flagged.filter((g) => { const mi = moveInfo(g, isSpread); return mi && mi.mv > 0; }).length;
+    const nAnch = isSpread && S.anch ? W.games.filter((g) => { const a = !g.final && anchCalc(g); return a && a.ae >= ANCH_FLAG; }).length : 0;
     const chance = isSpread ? "Cover chance is for the model's side with pushes refunded" : "Hit chance is for the model's side of the total";
     const lead = nLines
-      ? `<b>${n5} games</b> where the model is 5+ points off the ${what} (<b>${n7}</b> at 7+)${nTow ? `; the line has moved toward the model in <b>${nTow}</b> of them` : ''}. ${chance}; break-even at -110 is ${BREAK_EVEN}%. Move is since the first DraftKings line the daily job saw.`
+      ? `<b>${n5} games</b> where the model is 5+ points off the ${what} (<b>${n7}</b> at 7+)${nTow ? `; the line has moved toward the model in <b>${nTow}</b> of them` : ''}. ${chance}; break-even at -110 is ${BREAK_EVEN}%. Move is since the first DraftKings line the daily job saw.${isSpread && S.anch ? ` <b>Anch.</b> is the market-anchored model being tested side by side; it leans (2+ points, purple) on <b>${nAnch}</b> game${nAnch === 1 ? '' : 's'} this week. It rarely leans after week 6.` : ''}`
       : `No ${what}s posted for week ${W.week} yet. The daily job pulls DraftKings each morning; model numbers are already below.`;
     const sortArr = (key) => (UI.wsort.k === key ? `<span class="arr">${UI.wsort.d > 0 ? '▲' : '▼'}</span>` : '');
     el.innerHTML = `
@@ -303,7 +343,7 @@
           <div><h2>This week's games, week ${W.week}</h2></div>
           <span class="spacer"></span>
           <div class="seg" id="viewSeg"><button data-v="spread" class="${isSpread ? 'on' : ''}">Spreads</button><button data-v="total" class="${!isSpread ? 'on' : ''}">Totals</button></div>
-          <div class="seg" id="edgeSeg"><button data-e="0" class="${UI.minEdge === 0 ? 'on' : ''}">All</button><button data-e="5" class="${UI.minEdge === 5 ? 'on' : ''}">5+ pts</button><button data-e="7" class="${UI.minEdge === 7 ? 'on' : ''}">7+ pts</button></div>
+          <div class="seg" id="edgeSeg"><button data-e="0" class="${UI.minEdge === 0 ? 'on' : ''}">All</button><button data-e="5" class="${UI.minEdge === 5 ? 'on' : ''}">5+ pts</button><button data-e="7" class="${UI.minEdge === 7 ? 'on' : ''}">7+ pts</button>${isSpread && S.anch ? `<button data-e="-2" class="${UI.minEdge === -2 ? 'on' : ''}">Anchored 2+</button>` : ''}</div>
         </div>
         <p class="lead">${lead}</p>
         <div class="filters">
@@ -316,14 +356,14 @@
           <thead><tr>
             <th>Matchup</th><th class="sort" data-s="kickoff">Kickoff ${sortArr('kickoff')}</th>
             <th class="num">Line</th><th>Move</th><th class="num">Model</th><th>Model side</th>
-            <th class="num sort" data-s="edge">Edge ${sortArr('edge')}</th><th>${isSpread ? 'Cover chance' : 'Hit chance'}</th><th></th><th></th>
+            <th class="num sort" data-s="edge">Edge ${sortArr('edge')}</th><th title="${isSpread ? 'Cover chance for the model side, pushes refunded' : 'Hit chance for the model side of the total'}">${isSpread ? 'Cover' : 'Hit'}</th><th></th>${isSpread && S.anch ? '<th class="num" title="Market-anchored model edge. Purple when it leans 2+ points.">Anch.</th>' : ''}
           </tr></thead>
-          <tbody>${rows.map(({ g, c }, i) => (g.final && (i === 0 || !rows[i - 1].g.final) ? `<tr class="divider"><td colspan="10">Completed games</td></tr>` : '') + weekRow(g, c, isSpread)).join('') || `<tr><td colspan="10" class="empty">No games match.</td></tr>`}</tbody>
+          <tbody>${rows.map(({ g, c }, i) => (g.final && (i === 0 || !rows[i - 1].g.final) ? `<tr class="divider"><td colspan="11">Completed games</td></tr>` : '') + weekRow(g, c, isSpread)).join('') || `<tr><td colspan="10" class="empty">No games match.</td></tr>`}</tbody>
         </table></div>`}
         <p class="note">Kickoff times are Central. ${weekFootnote()}</p>
       </div>`;
     el.querySelectorAll('#viewSeg button').forEach((b) => (b.onclick = () => { UI.view = b.dataset.v; renderWeek(); }));
-    el.querySelectorAll('#edgeSeg button').forEach((b) => (b.onclick = () => { UI.minEdge = +b.dataset.e; renderWeek(); }));
+    el.querySelectorAll('#edgeSeg button').forEach((b) => (b.onclick = () => { UI.minEdge = +b.dataset.e; if (UI.minEdge === -2) UI.view = 'spread'; renderWeek(); }));
     el.querySelectorAll('th.sort').forEach((th) => (th.onclick = () => {
       const k2 = th.dataset.s; UI.wsort = { k: k2, d: UI.wsort.k === k2 ? -UI.wsort.d : (k2 === 'edge' ? -1 : 1) }; renderWeek();
     }));
@@ -367,6 +407,7 @@
         <div><span>Edge</span><b>${edge}</b></div>
         <div class="wide"><span>Model side</span><b class="acc">${side}</b></div>
         <div><span>${g.final ? 'Result' : isSpread ? 'Cover' : 'Hit'}</span><b>${ch}</b></div>
+        ${isSpread && S.anch ? `<div class="full"><span>Anchored model edge</span><b>${anchCell(g)}</b></div>` : ''}
       </div>
       ${mv && !mv.includes('class="dim"') ? `<div class="gmove">${mv}</div>` : ''}
     </div>`;
@@ -409,8 +450,7 @@
     }
     return `<tr class="${cls} click" data-open="${g.id}"><td class="mcell">${matchup(g)}</td><td class="mono">${when}</td>
       <td class="num">${line} ${L ? src : ''}</td><td>${g.final ? '<span class="dim">–</span>' : moveHtml(moveInfo(g, isSpread))}</td><td class="num">${model}</td><td>${side}</td>
-      <td class="num">${edge}</td><td class="mono">${ch}</td><td>${flag}</td>
-      <td><button class="open" data-open="${g.id}">Open</button></td></tr>`;
+      <td class="num">${edge}</td><td class="mono">${ch}</td><td>${flag}</td>${isSpread && S.anch ? `<td class="num acell">${anchCell(g)}</td>` : ''}</tr>`;
   }
   // how a finished game graded, from the same record the Results tab uses
   function gradeOf(g, isSpread) {
@@ -487,6 +527,7 @@
           <div class="stat"><div class="k">Total</div><div class="v">${tc ? (tc.over ? 'Over ' : 'Under ') + trim(L.total) : num(tp.total, 1)}</div>
             <div class="s">Model ${num(tp.total, 1)}${tc ? ' · hits ' + pct(tc.p) + ' · edge ' + num(tc.ae, 1) : ''}</div></div>
         </div>
+        ${anchStrip(g)}
         ${sc ? ladderHtml(g, sc) : ''}
       </div>
       <div class="grid2">
@@ -508,6 +549,15 @@
     bindInjuries(g); bindWeather(g);
   }
 
+  function anchStrip(g) {
+    const a = anchCalc(g);
+    if (!a) return '';
+    const fav = a.m >= 0 ? g.home : g.away;
+    const lean = a.ae >= ANCH_FLAG;
+    return `<div class="anch-strip ${lean ? 'on' : ''}"><span class="lbl">Market-anchored model</span>
+      <span>Spread <b>${esc(abbr(fav))} ${fmtLine(-Math.abs(a.m))}</b></span><span>Side <b>${esc(abbr(a.sideTeam))} ${fmtLine(a.sideLine)}</b></span>
+      <span>Edge <b>${num(a.ae, 1)}</b></span><span>Covers <b>${pct(a.p)}</b></span>${lean ? '<span class="flag fa">A 2+</span>' : '<span class="dim">no lean (under 2 pts)</span>'}</div>`;
+  }
   function lineHistory(g) {
     const mi = moveInfo(g, true);
     if (!mi) return '';
@@ -681,6 +731,8 @@
           <div class="stat"><div class="k">7+ edge</div><div class="v g7">${r7.s}</div><div class="s">${pct(r7.p, 1)}</div></div>
           <div class="stat"><div class="k">Totals, all games</div><div class="v">${ou.s}</div><div class="s">${pct(ou.p, 1)}</div></div>
           <div class="stat"><div class="k">Totals 5+ edge</div><div class="v">${ou5.s}</div><div class="s">${pct(ou5.p, 1)}</div></div>
+          ${S.anch ? (() => { const xs = R.filter((x) => x.anch_edge != null && Math.abs(x.anch_edge) >= ANCH_FLAG); const a2 = rec(xs, 'anch_result'); const al = rec(R.filter((x) => x.anch_edge != null), 'anch_result');
+            return `<div class="stat anch"><div class="k">Anchored 2+ leans</div><div class="v">${a2.s}</div><div class="s">${pct(a2.p, 1)} · all games ${al.s}</div></div>`; })() : ''}
         </div>
         <p class="note">Graded against the DraftKings game-day line once the daily job has tracked a game; before that, against ESPN's closing line. Every pick uses only information from before kickoff, and the model was trained on 2019-2025 only, so ${S.site.season} is fully out of sample. Pushes are not counted.</p>
         <div class="tblwrap"><table><thead><tr><th>Week</th><th class="num">Spreads</th><th class="num">5+ edge</th><th class="num">Totals</th></tr></thead><tbody>
@@ -943,6 +995,15 @@
         <p class="note">Weather: ${W.fitted ? esc(W.note) : 'not yet in the totals backtest. ' + esc(W.note)}</p>
       </div>
 
+      ${S.anch ? (() => { const AB = S.anch.backtest; return `<div class="card">
+        <h2>Side-by-side test: market-anchored model</h2>
+        <p class="lead">Added Oct 19, 2026. Instead of building a number from scratch, this version starts from the betting line and only moves off it where success rate, yards per play, FPI and fumble luck add something the line does not already contain. Once the line is in, FPI gets almost no weight from week 4 on: the market already prices it. It was more accurate in testing (average miss ${AB.mae.toFixed(2)} vs ${B.mae.spread_model.toFixed(2)}) and flags far fewer games: nearly all of its 2+ leans in the backtest came in weeks 1 through 6 (176 of 177), because by mid-season the line already reflects what the stats know. Its 2026 record is on the Results tab; like the main model's flags, it has lost so far this season. It runs alongside the main model for the rest of the season so the two can be compared on real lines before deciding which one leads.</p>
+        <div class="tblwrap"><table><thead><tr><th>Season</th><th class="num">All games</th><th class="num">2+ lean</th><th class="num">3+</th></tr></thead><tbody>
+          ${Object.entries(AB.by_season).map(([y, v]) => `<tr><td>${y}</td><td class="num">${r(v.all)}</td><td class="num">${r(v['2+'])}</td><td class="num">${r(v['3+'])}</td></tr>`).join('')}
+          <tr><td><b>Total</b></td><td class="num"><b>${r(AB.all)}</b></td><td class="num"><b>${r(AB['2+'])}</b></td><td class="num"><b>${r(AB['3+'])}</b></td></tr>
+        </tbody></table></div>
+        <p class="note">Only one flag level (2+) because 3+ anchored edges did not hold up in the backtest. Tested and rejected for both models: more ratings (EPA, points, a market power rating), the situational factors, boosted trees, and flagging only when stats and FPI agree.</p>
+      </div>`; })() : ''}
       <div class="card">
         <h2>What was tested</h2>
         <p class="lead">Each input below was added to (or removed from) the final spread model and the whole leave-one-season-out backtest was rerun (fitted on ${T.n_games.toLocaleString()} games from 2019-2025, scored on 2022-2025). Final model: average miss ${T.final.mae.toFixed(2)}, ${pct(T.final.ats, 1)} against the spread, ${pct(T.final.ats5, 1)} at 5+, ${pct(T.final.ats7, 1)} at 7+.</p>
@@ -979,6 +1040,7 @@
       const [site, week, ratings, results, model, backtest, tests] = await Promise.all(
         ['site.json', 'week.json', 'ratings.json', 'results.json', 'model.json', 'backtest.json', 'tests.json'].map(load));
       Object.assign(S, { site, week, ratings, results, model, backtest, tests });
+      try { S.anch = await load('anchored.json'); } catch (e) { S.anch = null; }
       S.ratingsById = {}; ratings.teams.forEach((t) => (S.ratingsById[t.id] = t));
       S.resultsById = {}; results.games.forEach((r) => (S.resultsById[r.id] = r));
     } catch (e) {
